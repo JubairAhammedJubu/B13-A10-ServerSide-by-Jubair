@@ -517,6 +517,154 @@ const client = new MongoClient(uri, {
       }
     });
 
+    // ===== RELATED LESSONS =====
+
+    app.get("/api/lessons/:id/related", async (req, res) => {
+      try {
+        const lesson = await lessonsCollection.findOne({
+          _id: new ObjectId(req.params.id),
+        });
+        if (!lesson) return res.status(404).send({message: "Not found"});
+
+        const related = await lessonsCollection
+          .find({
+            _id: {$ne: lesson._id},
+            visibility: "public",
+            $or: [
+              {category: lesson.category},
+              {emotionalTone: lesson.emotionalTone},
+            ],
+          })
+          .limit(6)
+          .toArray();
+        res.send(related);
+      } catch (error) {
+        res.status(500).send({message: error.message});
+      }
+    });
+
+    // ===== AUTHOR LESSONS =====
+
+    app.get("/api/lessons/by-creator/:email", async (req, res) => {
+      try {
+        const lessons = await lessonsCollection
+          .find({creatorEmail: req.params.email})
+          .sort({createdAt: -1})
+          .toArray();
+        res.send(lessons);
+      } catch (error) {
+        res.status(500).send({message: error.message});
+      }
+    });
+
+    // ===== ADMIN ROUTES =====
+
+    app.get("/api/users", verifyToken, verifyAdmin, async (req, res) => {
+      try {
+        const query = {};
+        if (req.query.role) query.role = req.query.role;
+        if (req.query.search) {
+          query.$or = [
+            {name: {$regex: req.query.search, $options: "i"}},
+            {email: {$regex: req.query.search, $options: "i"}},
+          ];
+        }
+        const users = await usersCollection
+          .find(query)
+          .sort({createdAt: -1})
+          .toArray();
+        res.send(users);
+      } catch (err) {
+        res.status(500).send({message: err.message});
+      }
+    });
+
+    app.patch(
+      "/api/users/:id/role",
+      verifyToken,
+      verifyAdmin,
+      async (req, res) => {
+        try {
+          const {role} = req.body;
+          const result = await usersCollection.updateOne(
+            {_id: new ObjectId(req.params.id)},
+            {$set: {role, updatedAt: new Date()}},
+          );
+          res.send(result);
+        } catch (err) {
+          res.status(500).send({message: err.message});
+        }
+      },
+    );
+
+    app.get("/api/users/me", verifyToken, async (req, res) => {
+      try {
+        const freshUser = await usersCollection.findOne({
+          _id: req.user._id,
+        });
+
+        res.send(freshUser);
+      } catch (err) {
+        res.status(500).send({message: err.message});
+      }
+    });
+
+    // GET public profile info for a list of emails
+    app.post("/api/users/profiles", async (req, res) => {
+      try {
+        const {emails} = req.body;
+        if (!Array.isArray(emails) || emails.length === 0) return res.json([]);
+        const users = await usersCollection
+          .find({email: {$in: emails}})
+          .project({name: 1, email: 1, image: 1, isPremium: 1, _id: 0})
+          .toArray();
+        res.json(users);
+      } catch (err) {
+        res.status(500).json({message: err.message});
+      }
+    });
+
+    // ===== ADMIN LESSON ROUTES =====
+
+    app.get(
+      "/api/admin/lessons",
+      verifyToken,
+      verifyAdmin,
+      async (req, res) => {
+        try {
+          const lessons = await lessonsCollection
+            .find({})
+            .sort({createdAt: -1})
+            .toArray();
+          const mapped = lessons.map((l) => ({
+            ...l,
+            authorName: l.creatorName || l.authorName || "Unknown",
+            authorEmail: l.creatorEmail || l.authorEmail || "",
+          }));
+          res.send(mapped);
+        } catch (err) {
+          res.status(500).send({message: err.message});
+        }
+      },
+    );
+
+    // DELETE any lesson (no creatorId guard)
+    app.delete(
+      "/api/admin/lessons/:id",
+      verifyToken,
+      verifyAdmin,
+      async (req, res) => {
+        try {
+          const result = await lessonsCollection.deleteOne({
+            _id: new ObjectId(req.params.id),
+          });
+          res.send(result);
+        } catch (err) {
+          res.status(500).send({message: err.message});
+        }
+      },
+    );
+
     
 
 app.get("/", (req, res) => {
