@@ -393,8 +393,53 @@ const client = new MongoClient(uri, {
       }
     });
 
-    
+    app.delete("/api/favorites/:lessonId", verifyToken, async (req, res) => {
+      try {
+        await favoritesCollection.deleteOne({
+          lessonId: req.params.lessonId,
+          userId: req.user._id.toString(),
+        });
+        await lessonsCollection.updateOne(
+          {_id: new ObjectId(req.params.lessonId)},
+          {$inc: {favoritesCount: -1}},
+        );
+        res.send({success: true});
+      } catch (error) {
+        res.status(500).send({message: error.message});
+      }
+    });
 
+    // ===== LIKES =====
+
+    app.patch("/api/lessons/:id/like", verifyToken, async (req, res) => {
+      try {
+        const lesson = await lessonsCollection.findOne({
+          _id: new ObjectId(req.params.id),
+        });
+        if (!lesson) return res.status(404).send({message: "Not found"});
+
+        const userId = req.user._id.toString();
+        const alreadyLiked = lesson.likes?.includes(userId);
+
+        if (alreadyLiked) {
+          await lessonsCollection.updateOne(
+            {_id: lesson._id},
+            {$pull: {likes: userId}, $inc: {likesCount: -1}},
+          );
+          return res.send({liked: false, likesCount: lesson.likesCount - 1});
+        }
+
+        await lessonsCollection.updateOne(
+          {_id: lesson._id},
+          {$addToSet: {likes: userId}, $inc: {likesCount: 1}},
+        );
+        res.send({liked: true, likesCount: lesson.likesCount + 1});
+      } catch (error) {
+        res.status(500).send({message: error.message});
+      }
+    });
+
+    
 app.get("/", (req, res) => {
   res.send("Welcome to learnora Server!");
 });
