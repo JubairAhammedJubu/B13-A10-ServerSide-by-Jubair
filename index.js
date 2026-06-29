@@ -272,7 +272,19 @@ const client = new MongoClient(uri, {
       }
     });
 
-   
+    app.delete("/api/lessons/:id", verifyToken, async (req, res) => {
+      try {
+        const result = await lessonsCollection.deleteOne({
+          _id: new ObjectId(req.params.id),
+          creatorId: req.user._id.toString(),
+        });
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({message: error.message});
+      }
+    });
+
+    
 
 app.get("/", (req, res) => {
   res.send("Welcome to learnora Server!");
