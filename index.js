@@ -202,6 +202,32 @@ const client = new MongoClient(uri, {
       }
     });
 
+    // GET lessons for the logged-in user (token only, no param)
+    app.get("/api/lessons/user", verifyToken, async (req, res) => {
+      try {
+        const lessons = await lessonsCollection
+          .find({creatorId: req.user._id.toString()})
+          .sort({createdAt: -1})
+          .toArray();
+        res.send({lessons});
+      } catch (error) {
+        res.status(500).send({message: error.message});
+      }
+    });
+
+    // GET lessons by userId param — used by the overview dashboard
+    app.get("/api/lessons/user/:userId", verifyToken, async (req, res) => {
+      try {
+        const lessons = await lessonsCollection
+          .find({creatorId: req.params.userId})
+          .sort({createdAt: -1})
+          .toArray();
+        res.send(lessons);
+      } catch (error) {
+        res.status(500).send({message: error.message});
+      }
+    });
+
     
 
 //     console.log(" All routes registered successfully!");
