@@ -439,7 +439,49 @@ const client = new MongoClient(uri, {
       }
     });
 
-    
+    app.get("/api/user/liked-count", verifyToken, async (req, res) => {
+      try {
+        const count = await lessonsCollection.countDocuments({
+          likes: req.user._id.toString(),
+        });
+        res.json({likedCount: count});
+      } catch (err) {
+        res.status(500).json({message: err.message});
+      }
+    });
+
+    // ===== REPORTS =====
+
+    app.post("/api/reports", verifyToken, async (req, res) => {
+      try {
+        const report = {
+          lessonId: req.body.lessonId,
+          reporterUserId: req.user._id.toString(),
+          reportedUserEmail: req.user.email,
+          reason: req.body.reason,
+          timestamp: new Date(),
+        };
+        await lessonReportsCollection.insertOne(report);
+        res.send({success: true});
+      } catch (error) {
+        res.status(500).send({message: error.message});
+      }
+    });
+
+    app.get("/api/reports", verifyToken, verifyAdmin, async (req, res) => {
+      try {
+        const reports = await lessonReportsCollection
+          .find({})
+          .sort({timestamp: -1})
+          .toArray();
+        res.send(reports);
+      } catch (err) {
+        res.status(500).send({message: err.message});
+      }
+    });
+
+   
+
 app.get("/", (req, res) => {
   res.send("Welcome to learnora Server!");
 });
