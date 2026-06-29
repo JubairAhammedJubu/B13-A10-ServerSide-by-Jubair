@@ -284,6 +284,69 @@ const client = new MongoClient(uri, {
       }
     });
 
+    app.patch("/api/lessons/:id", verifyToken, async (req, res) => {
+      try {
+        const lesson = await lessonsCollection.findOne({
+          _id: new ObjectId(req.params.id),
+        });
+
+        if (!lesson) {
+          return res.status(404).send({
+            message: "Lesson not found",
+          });
+        }
+
+        if (lesson.creatorId !== req.user._id.toString()) {
+          return res.status(403).send({
+            message: "Forbidden",
+          });
+        }
+
+        const {title, description, image, visibility, accessLevel} = req.body;
+
+        const updateDoc = {
+          updatedAt: new Date(),
+        };
+
+        if (title !== undefined) updateDoc.title = title;
+
+        if (description !== undefined) updateDoc.description = description;
+
+        if (image !== undefined) updateDoc.image = image;
+
+        if (visibility !== undefined) updateDoc.visibility = visibility;
+
+        if (accessLevel !== undefined) {
+          updateDoc.accessLevel =
+            req.user.isPremium && accessLevel === "premium"
+              ? "premium"
+              : "free";
+        }
+
+        await lessonsCollection.updateOne(
+          {
+            _id: lesson._id,
+          },
+          {
+            $set: updateDoc,
+          },
+        );
+
+        const updatedLesson = await lessonsCollection.findOne({
+          _id: lesson._id,
+        });
+
+        res.send({
+          success: true,
+          lesson: updatedLesson,
+        });
+      } catch (error) {
+        res.status(500).send({
+          message: error.message,
+        });
+      }
+    });
+
     
 
 app.get("/", (req, res) => {
