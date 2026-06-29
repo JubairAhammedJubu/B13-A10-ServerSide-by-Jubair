@@ -228,15 +228,51 @@ const client = new MongoClient(uri, {
       }
     });
 
-    
+    app.get("/api/lessons/:id", async (req, res) => {
+      try {
+        const user = await getUserFromToken(req);
 
-//     console.log(" All routes registered successfully!");
-//   } catch (error) {
-//     console.error("Failed to connect to MongoDB:", error);
-//   }
-// }
+        const lesson = await lessonsCollection.findOne({
+          _id: new ObjectId(req.params.id),
+        });
 
-// run().catch(console.dir);
+        if (!lesson) return res.status(404).send({message: "Not found"});
+
+        let creatorIsPremium = false;
+        try {
+          const creator = await usersCollection.findOne(
+            {_id: new ObjectId(lesson.creatorId)},
+            {projection: {isPremium: 1}},
+          );
+          creatorIsPremium = creator?.isPremium || false;
+        } catch (e) {
+          creatorIsPremium = false;
+        }
+
+        const enrichedLesson = {...lesson, creatorIsPremium};
+
+        if (lesson.accessLevel === "free") {
+          return res.send({lesson: enrichedLesson, hasAccess: true});
+        }
+
+        if (lesson.accessLevel === "premium") {
+          if (creatorIsPremium || user?.isPremium) {
+            return res.send({lesson: enrichedLesson, hasAccess: true});
+          }
+          return res.send({
+            lesson: {...stripPremiumFields(enrichedLesson), creatorIsPremium},
+            hasAccess: false,
+            message: "Premium required",
+          });
+        }
+
+        res.send({lesson: enrichedLesson, hasAccess: true});
+      } catch (err) {
+        res.status(500).send({message: err.message});
+      }
+    });
+
+   
 
 app.get("/", (req, res) => {
   res.send("Welcome to learnora Server!");
