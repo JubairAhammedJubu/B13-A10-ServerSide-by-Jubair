@@ -360,15 +360,40 @@ const client = new MongoClient(uri, {
       }
     });
 
+    app.post("/api/favorites", verifyToken, async (req, res) => {
+      try {
+        const {lessonId} = req.body;
+
+        const exists = await favoritesCollection.findOne({
+          lessonId,
+          userId: req.user._id.toString(),
+        });
+
+        if (exists) {
+          return res.send({
+            success: true,
+            message: "Already saved",
+          });
+        }
+
+        await favoritesCollection.insertOne({
+          lessonId,
+          userId: req.user._id.toString(),
+          createdAt: new Date(),
+        });
+
+        await lessonsCollection.updateOne(
+          {_id: new ObjectId(lessonId)},
+          {$inc: {favoritesCount: 1}},
+        );
+
+        res.send({success: true});
+      } catch (error) {
+        res.status(500).send({message: error.message});
+      }
+    });
+
     
-
-//     console.log(" All routes registered successfully!");
-//   } catch (error) {
-//     console.error("Failed to connect to MongoDB:", error);
-//   }
-// }
-
-// run().catch(console.dir);
 
 app.get("/", (req, res) => {
   res.send("Welcome to learnora Server!");
