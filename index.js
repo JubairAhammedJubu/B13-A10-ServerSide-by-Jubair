@@ -102,28 +102,115 @@ const client = new MongoClient(uri, {
       return user || null;
     };
 
-    // ===== SESSION UPDATE =====
 
-    async function updateUserSessions(userId, updateData) {
+    // ===== LESSON ROUTES =====
+
+    app.post("/api/lessons", verifyToken, async (req, res) => {
       try {
-        const result = await sessionCollection.updateMany(
-          {userId},
-          {
-            $set: {
-              isPremium: updateData.isPremium,
-              premiumActivatedAt: updateData.premiumActivatedAt,
-              updatedAt: new Date(),
-            },
-          },
-        );
+        const lesson = req.body;
 
-        console.log(`Updated ${result.modifiedCount} sessions`);
-      } catch (err) {
-        console.error(err);
+        const newLesson = {
+          title: lesson.title,
+          description: lesson.description,
+          category: lesson.category,
+          emotionalTone: lesson.emotionalTone,
+          image: lesson.image || "",
+          visibility: lesson.visibility || "public",
+          accessLevel: req.user.isPremium ? lesson.accessLevel : "free",
+          likes: [],
+          likesCount: 0,
+          favoritesCount: 0,
+          creatorId: req.user._id.toString(),
+          creatorName: req.user.name,
+          creatorEmail: req.user.email,
+          creatorPhoto: req.user.photoURL || "",
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        };
+
+        const result = await lessonsCollection.insertOne(newLesson);
+        res.status(201).send({
+          success: true,
+          lesson: {...newLesson, _id: result.insertedId},
+        });
+      } catch (error) {
+        res.status(500).send({success: false, message: error.message});
       }
-    }
+    });
 
-;
+    app.get("/api/lessons", async (req, res) => {
+      try {
+        const page = parseInt(req.query.page) || 1;
+        const perPage = parseInt(req.query.perPage) || 6;
+        const skip = (page - 1) * perPage;
+
+        const {search, category, emotionalTone, sort} = req.query;
+        const andConditions = [{visibility: "public"}];
+
+        if (search) {
+          andConditions.push({
+            $or: [
+              {title: {$regex: search, $options: "i"}},
+              {description: {$regex: search, $options: "i"}},
+            ],
+          });
+        }
+
+        if (category && category !== "all") andConditions.push({category});
+        if (emotionalTone && emotionalTone !== "all")
+          andConditions.push({emotionalTone});
+
+        const query = {$and: andConditions};
+
+        let sortObj = {createdAt: -1};
+        if (sort === "most_liked") sortObj = {likesCount: -1};
+        if (sort === "most_saved") sortObj = {favoritesCount: -1};
+
+        const total = await lessonsCollection.countDocuments(query);
+        const lessons = await lessonsCollection
+          .find(query)
+          .sort(sortObj)
+          .skip(skip)
+          .limit(perPage)
+          .toArray();
+
+        const creatorIds = [...new Set(lessons.map((l) => l.creatorId))];
+        const creators = await usersCollection
+          .find({_id: {$in: creatorIds.map((id) => new ObjectId(id))}})
+          .project({_id: 1, isPremium: 1})
+          .toArray();
+
+        const creatorPremiumMap = {};
+        creators.forEach((c) => {
+          creatorPremiumMap[c._id.toString()] = c.isPremium || false;
+        });
+
+        const enrichedLessons = lessons.map((lesson) => ({
+          ...lesson,
+          creatorIsPremium: creatorPremiumMap[lesson.creatorId] || false,
+        }));
+
+        res.send({
+          lessons: enrichedLessons,
+          total,
+          page,
+          perPage,
+          totalPages: Math.ceil(total / perPage),
+        });
+      } catch (err) {
+        res.status(500).send({message: err.message});
+      }
+    });
+
+    
+
+//     console.log(" All routes registered successfully!");
+//   } catch (error) {
+//     console.error("Failed to connect to MongoDB:", error);
+//   }
+// }
+
+// run().catch(console.dir);
 
 app.get("/", (req, res) => {
   res.send("Welcome to learnora Server!");
