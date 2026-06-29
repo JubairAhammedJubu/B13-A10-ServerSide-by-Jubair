@@ -347,7 +347,28 @@ const client = new MongoClient(uri, {
       }
     });
 
+    // ===== FAVORITES =====
+
+    app.get("/api/favorites", verifyToken, async (req, res) => {
+      try {
+        const favorites = await favoritesCollection
+          .find({userId: req.user._id.toString()})
+          .toArray();
+        res.send(favorites);
+      } catch (error) {
+        res.status(500).send({message: error.message});
+      }
+    });
+
     
+
+//     console.log(" All routes registered successfully!");
+//   } catch (error) {
+//     console.error("Failed to connect to MongoDB:", error);
+//   }
+// }
+
+// run().catch(console.dir);
 
 app.get("/", (req, res) => {
   res.send("Welcome to learnora Server!");
