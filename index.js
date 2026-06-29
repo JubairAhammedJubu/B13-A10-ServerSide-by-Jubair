@@ -480,7 +480,44 @@ const client = new MongoClient(uri, {
       }
     });
 
-   
+    // ===== COMMENTS =====
+
+    app.get("/api/lessons/:id/comments", async (req, res) => {
+      try {
+        const comments = await commentsCollection
+          .find({lessonId: req.params.id})
+          .sort({createdAt: -1})
+          .toArray();
+        res.send(comments);
+      } catch (error) {
+        res.status(500).send({message: error.message});
+      }
+    });
+
+    app.post("/api/lessons/:id/comments", verifyToken, async (req, res) => {
+      try {
+        const {text} = req.body;
+        if (!text || !text.trim())
+          return res.status(400).send({message: "Comment text is required"});
+
+        const comment = {
+          lessonId: req.params.id,
+          text: text.trim(),
+          userId: req.user._id.toString(),
+          userName: req.user.name,
+          userPhoto: req.user.photoURL || "",
+          createdAt: new Date(),
+        };
+        const result = await commentsCollection.insertOne(comment);
+        res
+          .status(201)
+          .send({success: true, comment: {...comment, _id: result.insertedId}});
+      } catch (error) {
+        res.status(500).send({message: error.message});
+      }
+    });
+
+    
 
 app.get("/", (req, res) => {
   res.send("Welcome to learnora Server!");
