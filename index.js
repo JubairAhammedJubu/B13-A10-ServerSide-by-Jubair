@@ -102,6 +102,265 @@ const client = new MongoClient(uri, {
       return user || null;
     };
 
+    // ===== SESSION UPDATE =====
+
+    async function updateUserSessions(userId, updateData) {
+      try {
+        const result = await sessionCollection.updateMany(
+          {userId},
+          {
+            $set: {
+              isPremium: updateData.isPremium,
+              premiumActivatedAt: updateData.premiumActivatedAt,
+              updatedAt: new Date(),
+            },
+          },
+        );
+
+        console.log(`Updated ${result.modifiedCount} sessions`);
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    const PREMIUM_FIELDS = ["description"];
+
+    const stripPremiumFields = (lesson) => {
+      const copy = {...lesson};
+      for (const field of PREMIUM_FIELDS) delete copy[field];
+      return copy;
+    };
+
+    // ===== STRIPE TEST =====
+
+    app.get("/api/test-stripe", async (req, res) => {
+      try {
+        if (!stripe) {
+          return res.status(500).json({
+            configured: false,
+            message: "Stripe not configured",
+            details: {
+              keyExists: !!process.env.STRIPE_SECRET_KEY,
+              keyFormat: process.env.STRIPE_SECRET_KEY?.startsWith("sk_"),
+            },
+          });
+        }
+        const balance = await stripe.balance.retrieve();
+        res.json({
+          configured: true,
+          message: "Stripe is configured and working",
+          balance: {available: balance.available, pending: balance.pending},
+        });
+      } catch (error) {
+        res.status(500).json({configured: false, error: error.message});
+      }
+    });
+
+    // ===== STRIPE PAYMENT =====
+
+    app.post("/create-checkout-session", async (req, res) => {
+      try {
+        console.log("📦 Creating checkout session...");
+
+        if (!stripe) {
+          console.error("❌ Stripe not initialized");
+          return res.status(500).json({
+            error: "Payment system is not configured. Please contact support.",
+          });
+        }
+
+        const {userId, userEmail, userName} = req.body;
+        if (!userId || !userEmail)
+          return res.status(400).json({error: "Missing user information"});
+
+        const baseUrl = process.env.CLIENT_URL || "http://localhost:3000";
+
+        const session = await stripe.checkout.sessions.create({
+          payment_method_types: ["card"],
+          line_items: [
+            {
+              price_data: {
+                currency: "bdt",
+                product_data: {
+                  name: "Ghurni Premium Membership",
+                  description:
+                    "Lifetime access to premium features - One time payment",
+                },
+                unit_amount: 150000,
+              },
+              quantity: 1,
+            },
+          ],
+          mode: "payment",
+          success_url: `${baseUrl}/payment/success?session_id={CHECKOUT_SESSION_ID}&userId=${userId}`,
+          cancel_url: `${baseUrl}/payment/cancel?reason=cancelled`,
+          customer_email: userEmail,
+          metadata: {userId, userEmail},
+        });
+
+        console.log(`✅ Checkout session created: ${session.id}`);
+        res.json({url: session.url});
+      } catch (error) {
+        console.error("❌ Checkout session error:", error);
+        res
+          .status(500)
+          .json({error: error.message || "Failed to create payment session"});
+      }
+    });
+
+    app.get("/api/verify-payment", verifyToken, async (req, res) => {
+      try {
+        if (!stripe)
+          return res.status(400).json({error: "Stripe not configured"});
+
+        const {session_id} = req.query;
+        if (!session_id)
+          return res.status(400).json({error: "Missing session_id"});
+
+        const stripeSession =
+          await stripe.checkout.sessions.retrieve(session_id);
+
+        if (stripeSession.payment_status === "paid") {
+          const result = await usersCollection.updateOne(
+            {_id: req.user._id},
+            {
+              $set: {
+                isPremium: true,
+                premiumActivatedAt: new Date(),
+                stripeSessionId: session_id,
+                updatedAt: new Date(),
+              },
+            },
+          );
+
+          if (result.modifiedCount === 1) {
+            await updateUserSessions(req.user._id, {
+              isPremium: true,
+              premiumActivatedAt: new Date(),
+            });
+            req.user.isPremium = true;
+            const updatedUser = await usersCollection.findOne({
+              _id: req.user._id,
+            });
+            return res.json({
+              success: true,
+              message: "Payment verified and premium activated!",
+              isPremium: true,
+              user: {...updatedUser, isPremium: true},
+            });
+          }
+
+          return res.json({
+            success: false,
+            message: "Failed to update user premium status",
+            isPremium: false,
+          });
+        }
+
+        res.json({
+          success: false,
+          message: "Payment not completed",
+          isPremium: false,
+        });
+      } catch (error) {
+        console.error("❌ Verify payment error:", error);
+        res.status(500).json({error: error.message});
+      }
+    });
+
+    app.get("/api/user/premium-status", verifyToken, async (req, res) => {
+      try {
+        const user = await usersCollection.findOne({_id: req.user._id});
+        if (!user) return res.status(404).json({message: "User not found"});
+
+        if (user.isPremium && !req.user.isPremium) {
+          await updateUserSessions(req.user._id, {
+            isPremium: true,
+            premiumActivatedAt: user.premiumActivatedAt,
+          });
+        }
+
+        res.json({
+          isPremium: user.isPremium || false,
+          premiumActivatedAt: user.premiumActivatedAt || null,
+        });
+      } catch (error) {
+        res.status(500).json({message: error.message});
+      }
+    });
+
+    // ===== COLLECTION STATS — counts from every collection =====
+
+    app.get("/api/collection-stats", verifyToken, async (req, res) => {
+      try {
+        const [users, lessons, comments, reports, favoriteAgg] =
+          await Promise.all([
+            usersCollection.countDocuments(),
+            lessonsCollection.countDocuments(),
+            commentsCollection.countDocuments(),
+            lessonReportsCollection.countDocuments(),
+            favoritesCollection
+              .aggregate([
+                {
+                  $group: {
+                    _id: {
+                      userId: "$userId",
+                      lessonId: "$lessonId",
+                    },
+                  },
+                },
+                {
+                  $count: "total",
+                },
+              ])
+              .toArray(),
+          ]);
+
+        res.json({
+          users,
+          lessons,
+          favorites: favoriteAgg[0]?.total || 0,
+          comments,
+          reports,
+        });
+      } catch (err) {
+        res.status(500).send({message: err.message});
+      }
+    });
+
+    app.get("/api/stats", async (req, res) => {
+      try {
+        const [
+          totalUsers,
+          totalLessons,
+          totalPremiumUsers,
+          totalFeatured,
+          byCategory,
+        ] = await Promise.all([
+          usersCollection.countDocuments(),
+          lessonsCollection.countDocuments(),
+          usersCollection.countDocuments({isPremium: true}),
+          lessonsCollection.countDocuments({featured: true}),
+          lessonsCollection
+            .aggregate([
+              {$group: {_id: "$category", count: {$sum: 1}}},
+              {$project: {category: "$_id", count: 1, _id: 0}},
+              {$sort: {count: -1}},
+            ])
+            .toArray(),
+        ]);
+
+        res.json({
+          totalUsers,
+          totalLessons,
+          totalPremiumUsers,
+          totalFeatured,
+          byCategory,
+        });
+      } catch (err) {
+        res.status(500).json({message: err.message});
+      }
+    });
 
     // ===== LESSON ROUTES =====
 
