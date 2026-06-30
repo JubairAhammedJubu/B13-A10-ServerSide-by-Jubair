@@ -665,7 +665,91 @@ const client = new MongoClient(uri, {
       },
     );
 
-    
+    // PATCH featured flag
+    app.patch(
+      "/api/admin/lessons/:id/featured",
+      verifyToken,
+      verifyAdmin,
+      async (req, res) => {
+        try {
+          const {featured} = req.body;
+          const result = await lessonsCollection.updateOne(
+            {_id: new ObjectId(req.params.id)},
+            {$set: {featured: !!featured, updatedAt: new Date()}},
+          );
+          res.send(result);
+        } catch (err) {
+          res.status(500).send({message: err.message});
+        }
+      },
+    );
+
+    // PATCH reviewed flag
+    app.patch(
+      "/api/admin/lessons/:id/reviewed",
+      verifyToken,
+      verifyAdmin,
+      async (req, res) => {
+        try {
+          const {reviewed} = req.body;
+          const result = await lessonsCollection.updateOne(
+            {_id: new ObjectId(req.params.id)},
+            {$set: {reviewed: !!reviewed, updatedAt: new Date()}},
+          );
+          res.send(result);
+        } catch (err) {
+          res.status(500).send({message: err.message});
+        }
+      },
+    );
+
+    // PURGE: delete lesson + all its reports atomically
+    app.delete(
+      "/api/admin/lessons/:id/purge",
+      verifyToken,
+      verifyAdmin,
+      async (req, res) => {
+        try {
+          const lessonId = req.params.id;
+          const [lessonResult, reportsResult] = await Promise.all([
+            lessonsCollection.deleteOne({_id: new ObjectId(lessonId)}),
+            lessonReportsCollection.deleteMany({lessonId}), // string match, same as stored
+          ]);
+          res.send({
+            success: true,
+            deletedLesson: lessonResult.deletedCount,
+            deletedReports: reportsResult.deletedCount,
+          });
+        } catch (err) {
+          res.status(500).send({message: err.message});
+        }
+      },
+    );
+
+    // CLEAR REPORTS
+    app.delete(
+      "/api/admin/lessons/:id/clear-reports",
+      verifyToken,
+      verifyAdmin,
+      async (req, res) => {
+        try {
+          const result = await lessonReportsCollection.deleteMany({
+            lessonId: req.params.id,
+          });
+          res.send({success: true, deletedReports: result.deletedCount});
+        } catch (err) {
+          res.status(500).send({message: err.message});
+        }
+      },
+    );
+
+//     console.log(" All routes registered successfully!");
+//   } catch (error) {
+//     console.error("Failed to connect to MongoDB:", error);
+//   }
+// }
+
+// run().catch(console.dir);
 
 app.get("/", (req, res) => {
   res.send("Welcome to learnora Server!");
